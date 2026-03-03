@@ -11,10 +11,12 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+const cleanEnv = (val) => (val || "").replace(/['"]/g, "").trim();
+
 cloudinary.config({
-    cloud_name: process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME || process.env.VITE_CLOUDINARY_CLOUD_NAME,
-    api_key: process.env.CLOUDINARY_API_KEY,
-    api_secret: process.env.CLOUDINARY_API_SECRET,
+    cloud_name: cleanEnv(process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME || process.env.VITE_CLOUDINARY_CLOUD_NAME || 'dlq8lvl0n'),
+    api_key: cleanEnv(process.env.CLOUDINARY_API_KEY),
+    api_secret: cleanEnv(process.env.CLOUDINARY_API_SECRET),
     secure: true
 });
 
@@ -183,7 +185,10 @@ app.delete('/api/images/:id', async (req, res) => {
         const publicId = rows[0].public_id;
 
         if (publicId) {
-            await cloudinary.uploader.destroy(publicId);
+            const cloudRes = await cloudinary.uploader.destroy(publicId);
+            if (cloudRes.result !== 'ok' && cloudRes.result !== 'not found') {
+                return res.status(400).json({ error: cloudRes.error?.message || cloudRes.result });
+            }
         }
 
         await pool.query('DELETE FROM photos WHERE id = ?', [id]);
