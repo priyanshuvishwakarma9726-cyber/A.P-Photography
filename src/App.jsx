@@ -386,17 +386,12 @@ function AdminDashboard() {
     if (!file || !title) return;
     setUploading(true);
     try {
-      // 1. Ask Backend for Cloudinary secure signature
-      const signRes = await fetch('/api/sign');
-      const { timestamp, signature, apiKey, cloudName, folder } = await signRes.json();
+      const cloudName = "dlq8lvl0n"; // Aapka cloud name
+      const uploadPreset = "portfolio_preset"; // Jo aapne Step 1 mein banaya
 
-      // 2. Transmit DIRECT to Cloudinary Cloud with SIGNATURE
       const formData = new FormData();
       formData.append('file', file);
-      formData.append('folder', folder);
-      formData.append('api_key', apiKey);
-      formData.append('timestamp', timestamp);
-      formData.append('signature', signature);
+      formData.append('upload_preset', uploadPreset);
 
       const cloudinaryRes = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/image/upload`, {
         method: 'POST',
@@ -404,8 +399,8 @@ function AdminDashboard() {
       });
 
       if (!cloudinaryRes.ok) {
-        const errorText = await cloudinaryRes.text();
-        throw new Error("Cloudinary Error: " + errorText);
+        const errorData = await cloudinaryRes.json();
+        throw new Error(errorData.error?.message || "Cloudinary Upload Failed");
       }
       const cloudData = await cloudinaryRes.json();
 
