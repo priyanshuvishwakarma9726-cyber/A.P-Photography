@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, useNavigate, Navigate } from 'react-router-dom';
-import { ClerkProvider, SignedIn, SignedOut, SignInButton, UserButton, useUser } from '@clerk/clerk-react';
-import { Camera, Download, X, Lock, UploadCloud, Database, Users, ImagePlus, UserX, UserCheck, Grid, Trash2, Edit2, Check, BarChart, Activity } from 'lucide-react';
+import { ClerkProvider, SignedIn, SignedOut, useUser, useSignIn, useSignUp, UserButton } from '@clerk/clerk-react';
+import { Camera, Download, X, Lock, UploadCloud, Database, Users, ImagePlus, UserX, UserCheck, Grid, Trash2, Edit2, Check, BarChart, Activity, Mail, User, ArrowRight, Eye, EyeOff } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 const PUBLISHABLE_KEY = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
@@ -72,11 +72,12 @@ function Home() {
             <UserButton afterSignOutUrl="/" />
           </SignedIn>
           <SignedOut>
-            <SignInButton mode="modal">
-              <button className="flex items-center space-x-2 px-5 py-2 rounded-full text-sm font-medium transition-colors border bg-transparent text-zinc-300 border-zinc-800 hover:border-zinc-500 hover:text-white">
-                Client Login
-              </button>
-            </SignInButton>
+            <button
+              onClick={() => navigate('/sign-in')}
+              className="flex items-center space-x-2 px-6 py-2.5 rounded-full text-sm font-semibold transition-all border bg-white/5 text-white border-zinc-800 hover:border-zinc-400 hover:scale-105 active:scale-95 shadow-lg backdrop-blur-sm"
+            >
+              Client Login
+            </button>
           </SignedOut>
         </motion.div>
       </header>
@@ -253,6 +254,345 @@ function Home() {
           </motion.div>
         )}
       </AnimatePresence>
+    </div>
+  );
+}
+
+function SignInPage() {
+  const { isLoaded, signIn, setActive } = useSignIn();
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const navigate = useNavigate();
+
+  const handleSignIn = async (e) => {
+    e.preventDefault();
+    if (!isLoaded) return;
+    setLoading(true);
+    setError("");
+
+    try {
+      const result = await signIn.create({ identifier: email, password });
+      if (result.status === "complete") {
+        await setActive({ session: result.createdSessionId });
+        navigate("/");
+      }
+    } catch (err) {
+      setError(err.errors[0]?.longMessage || "Authentication failed.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-zinc-950 flex flex-col lg:flex-row font-sans overflow-x-hidden">
+      {/* Background for Mobile / Left Side for Desktop */}
+      <div className="relative w-full lg:w-1/2 h-64 lg:h-screen overflow-hidden">
+        <motion.div
+          initial={{ scale: 1.1, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          transition={{ duration: 1.5, ease: "easeOut" }}
+          className="absolute inset-0 bg-cover bg-center"
+          style={{ backgroundImage: "url('/auth-bg.png')" }}
+        />
+        {/* Mobile Overlay: Blur & Darken */}
+        <div className="absolute inset-0 bg-zinc-950/40 lg:bg-transparent lg:bg-gradient-to-r lg:from-transparent lg:via-zinc-950/20 lg:to-zinc-950 transition-all" />
+
+        {/* Brand Overlay on Image (Mobile Top) */}
+        <div className="absolute top-8 left-8 lg:top-12 lg:left-12 flex items-center gap-2 z-20" onClick={() => navigate('/')}>
+          <div className="w-8 h-8 lg:w-10 lg:h-10 bg-white/10 border border-white/20 rounded-xl flex items-center justify-center backdrop-blur-md">
+            <Camera className="w-4 h-4 lg:w-5 lg:h-5 text-white" />
+          </div>
+          <span className="text-lg lg:text-xl font-bold tracking-widest uppercase text-white">A.P Photography<span className="text-zinc-500">.</span></span>
+        </div>
+
+        {/* Desktop Title Overlay */}
+        <div className="hidden lg:block absolute bottom-12 left-12 max-w-lg z-20">
+          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.8 }}>
+            <h2 className="text-4xl font-bold tracking-tight text-white mb-4">Timeless Vision<span className="text-zinc-500">.</span></h2>
+            <p className="text-zinc-300 text-base font-light font-medium tracking-wide">Experience photography curated with an architectural eye and editorial soul.</p>
+          </motion.div>
+        </div>
+      </div>
+
+      {/* Right Form Container */}
+      <div className="flex-1 flex items-center justify-center p-6 md:p-12 lg:p-20 relative bg-zinc-950 lg:border-l lg:border-zinc-900 min-h-[calc(100vh-16rem)] lg:min-h-screen">
+        <div className="w-full max-w-md space-y-10 lg:space-y-12">
+          <div className="text-center lg:text-left">
+            <h1 className="text-3xl lg:text-4xl font-bold tracking-tight text-white mb-3">Welcome Back</h1>
+            <p className="text-zinc-500 text-sm font-light">Please enter your credentials to access your private gallery.</p>
+          </div>
+
+          <form onSubmit={handleSignIn} className="space-y-6">
+            <div className="space-y-2">
+              <label className="text-xs font-semibold text-zinc-500 uppercase tracking-widest ml-1">Email Address</label>
+              <div className="relative group">
+                <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-600 group-focus-within:text-zinc-300 transition-colors" />
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="name@company.com"
+                  required
+                  className="w-full bg-zinc-900/30 border border-zinc-800 focus:border-zinc-500 p-4 pl-12 rounded-2xl outline-none focus:ring-4 focus:ring-zinc-900/50 text-white placeholder:text-zinc-700 transition-all backdrop-blur-md"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex justify-between items-center ml-1">
+                <label className="text-xs font-semibold text-zinc-500 uppercase tracking-widest">Password</label>
+                <button type="button" className="text-[10px] text-zinc-600 hover:text-white transition-colors uppercase tracking-widest">Forgot?</button>
+              </div>
+              <div className="relative group">
+                <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-600 group-focus-within:text-zinc-300 transition-colors" />
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  required
+                  className="w-full bg-zinc-900/30 border border-zinc-800 focus:border-zinc-500 p-4 pl-12 rounded-2xl outline-none focus:ring-4 focus:ring-zinc-900/50 text-white placeholder:text-zinc-700 transition-all backdrop-blur-md"
+                />
+              </div>
+            </div>
+
+            {error && (
+              <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="p-4 bg-red-500/10 border border-red-500/20 rounded-xl text-red-500 text-[11px] flex items-center gap-2">
+                <X className="w-3.5 h-3.5" />
+                {error}
+              </motion.div>
+            )}
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full bg-white text-black py-4 rounded-full font-bold hover:bg-zinc-200 transition-all transform active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-2 shadow-xl shadow-white/5"
+            >
+              {loading ? "Authenticating..." : "Sign In"}
+              {!loading && <ArrowRight className="w-4 h-4" />}
+            </button>
+          </form>
+
+          <footer className="text-center lg:text-left pt-6">
+            <p className="text-zinc-600 text-sm font-light">
+              New client? <button onClick={() => navigate('/sign-up')} className="text-white hover:underline transition-all font-medium ml-1">Create an account</button>
+            </p>
+          </footer>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SignUpPage() {
+  const { isLoaded, signUp, setActive } = useSignUp();
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const [code, setCode] = useState("");
+  const [verifying, setVerifying] = useState(false);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const navigate = useNavigate();
+
+  const handleSignUp = async (e) => {
+    e.preventDefault();
+    if (!isLoaded) return;
+    setLoading(true);
+    setError("");
+
+    try {
+      await signUp.create({ emailAddress: email, password, firstName, lastName });
+      await signUp.prepareEmailAddressVerification({ strategy: "email_code" });
+      setVerifying(true);
+    } catch (err) {
+      setError(err.errors[0]?.longMessage || "Registration failed.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleVerification = async (e) => {
+    e.preventDefault();
+    if (!isLoaded) return;
+    setLoading(true);
+    setError("");
+
+    try {
+      const result = await signUp.attemptEmailAddressVerification({ code });
+      if (result.status === "complete") {
+        await setActive({ session: result.createdSessionId });
+        navigate("/");
+      }
+    } catch (err) {
+      setError(err.errors[0]?.longMessage || "Incorrect code.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-zinc-950 flex flex-col lg:flex-row font-sans overflow-x-hidden">
+      {/* Background for Mobile / Left Side for Desktop */}
+      <div className="relative w-full lg:w-1/2 h-48 lg:h-screen overflow-hidden">
+        <motion.div
+          initial={{ scale: 1.1, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          transition={{ duration: 1.5, ease: "easeOut" }}
+          className="absolute inset-0 bg-cover bg-center"
+          style={{ backgroundImage: "url('/auth-bg.png')" }}
+        />
+        <div className="absolute inset-0 bg-zinc-950/50 lg:bg-transparent lg:bg-gradient-to-r lg:from-transparent lg:via-zinc-950/20 lg:to-zinc-950" />
+
+        <div className="absolute top-8 left-8 lg:top-12 lg:left-12 flex items-center gap-2 z-20" onClick={() => navigate('/')}>
+          <div className="w-8 h-8 lg:w-10 lg:h-10 bg-white/10 border border-white/20 rounded-xl flex items-center justify-center backdrop-blur-md">
+            <Camera className="w-4 h-4 lg:w-5 lg:h-5 text-white" />
+          </div>
+          <span className="text-lg lg:text-xl font-bold tracking-widest uppercase text-white">A.P Photography<span className="text-zinc-500">.</span></span>
+        </div>
+
+        <div className="hidden lg:block absolute bottom-12 left-12 max-w-lg z-20">
+          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.8 }}>
+            <h2 className="text-4xl font-bold tracking-tight text-white mb-4">Join the Collective<span className="text-zinc-500">.</span></h2>
+            <p className="text-zinc-300 text-base font-light font-medium tracking-wide">Join our elite circle of clients and get exclusive access to your high-resolution portfolio.</p>
+          </motion.div>
+        </div>
+      </div>
+
+      {/* Right Form Container */}
+      <div className="flex-1 flex items-center justify-center p-6 md:p-12 lg:p-20 relative bg-zinc-950 lg:border-l lg:border-zinc-900 min-h-[calc(100vh-12rem)] lg:min-h-screen">
+        <div className="w-full max-w-md space-y-10 lg:space-y-12">
+          <div className="text-center lg:text-left">
+            <h1 className="text-3xl lg:text-4xl font-bold tracking-tight text-white mb-3">
+              {verifying ? "Verify Identity" : "Create Access"}
+            </h1>
+            <p className="text-zinc-500 text-sm font-light">
+              {verifying ? "We've sent a code to your inbox. Enter it below to proceed." : "Establish your unique entrance to our curated portfolio."}
+            </p>
+          </div>
+
+          {!verifying ? (
+            <form onSubmit={handleSignUp} className="space-y-5">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <label className="text-xs font-semibold text-zinc-500 uppercase tracking-widest ml-1">First Name</label>
+                  <input
+                    type="text"
+                    value={firstName}
+                    onChange={(e) => setFirstName(e.target.value)}
+                    placeholder="Aditya"
+                    required
+                    className="w-full bg-zinc-900/30 border border-zinc-800 focus:border-zinc-500 p-4 rounded-2xl outline-none focus:ring-4 focus:ring-zinc-900/50 text-white placeholder:text-zinc-700 transition-all backdrop-blur-md"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-semibold text-zinc-500 uppercase tracking-widest ml-1">Last Name</label>
+                  <input
+                    type="text"
+                    value={lastName}
+                    onChange={(e) => setLastName(e.target.value)}
+                    placeholder="Kumar"
+                    required
+                    className="w-full bg-zinc-900/30 border border-zinc-800 focus:border-zinc-500 p-4 rounded-2xl outline-none focus:ring-4 focus:ring-zinc-900/50 text-white placeholder:text-zinc-700 transition-all backdrop-blur-md"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-xs font-semibold text-zinc-500 uppercase tracking-widest ml-1">Email Address</label>
+                <div className="relative group">
+                  <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-600 group-focus-within:text-zinc-300 transition-colors" />
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="name@company.com"
+                    required
+                    className="w-full bg-zinc-900/30 border border-zinc-800 focus:border-zinc-500 p-4 pl-12 rounded-2xl outline-none focus:ring-4 focus:ring-zinc-900/50 text-white placeholder:text-zinc-700 transition-all backdrop-blur-md"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-xs font-semibold text-zinc-500 uppercase tracking-widest ml-1">Password</label>
+                <div className="relative group">
+                  <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-600 group-focus-within:text-zinc-300 transition-colors" />
+                  <input
+                    type="password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="••••••••"
+                    required
+                    className="w-full bg-zinc-900/30 border border-zinc-800 focus:border-zinc-500 p-4 pl-12 rounded-2xl outline-none focus:ring-4 focus:ring-zinc-900/50 text-white placeholder:text-zinc-700 transition-all backdrop-blur-md"
+                  />
+                </div>
+              </div>
+
+              {error && (
+                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="p-4 bg-red-500/10 border border-red-500/20 rounded-xl text-red-500 text-[11px]">
+                  {error}
+                </motion.div>
+              )}
+
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full bg-white text-black py-4 rounded-full font-bold hover:bg-zinc-200 transition-all transform active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-2 shadow-xl shadow-white/5"
+              >
+                {loading ? "Preparing Account..." : "Generate Access"}
+                {!loading && <ArrowRight className="w-4 h-4" />}
+              </button>
+            </form>
+          ) : (
+            <form onSubmit={handleVerification} className="space-y-8">
+              <div className="space-y-4 text-center">
+                <label className="text-xs font-semibold text-zinc-500 uppercase tracking-widest">Verification Code</label>
+                <input
+                  type="text"
+                  value={code}
+                  onChange={(e) => setCode(e.target.value)}
+                  placeholder="123456"
+                  maxLength={6}
+                  required
+                  className="w-full bg-zinc-900/40 border border-zinc-800 focus:border-zinc-500 p-6 text-center text-4xl tracking-[1.5rem] rounded-3xl outline-none focus:ring-4 focus:ring-zinc-900/50 text-white transition-all backdrop-blur-xl font-bold"
+                />
+              </div>
+
+              {error && (
+                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="p-4 bg-red-500/10 border border-red-500/20 rounded-xl text-red-500 text-xs text-center font-medium">
+                  {error}
+                </motion.div>
+              )}
+
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full bg-white text-black py-4 rounded-full font-bold hover:bg-zinc-200 transition-all shadow-xl shadow-white/10 flex items-center justify-center"
+              >
+                {loading ? "Verifying..." : "Access Portfolio"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setVerifying(false)}
+                className="w-full text-zinc-600 text-xs hover:text-white transition-colors uppercase tracking-widest font-bold"
+              >
+                Change details
+              </button>
+            </form>
+          )}
+
+          {!verifying && (
+            <footer className="text-center lg:text-left pt-6">
+              <p className="text-zinc-600 text-sm font-light">
+                Existing client? <button onClick={() => navigate('/sign-in')} className="text-white hover:underline transition-all font-medium ml-1">Enter gallery</button>
+              </p>
+            </footer>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -767,6 +1107,8 @@ export default function App() {
       <BrowserRouter>
         <Routes>
           <Route path="/" element={<Home />} />
+          <Route path="/sign-in" element={<SignInPage />} />
+          <Route path="/sign-up" element={<SignUpPage />} />
           <Route path="/admin-dashboard" element={<AdminDashboard />} />
           <Route path="*" element={<Navigate to="/" />} />
         </Routes>
