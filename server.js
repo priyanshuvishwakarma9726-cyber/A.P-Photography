@@ -34,18 +34,20 @@ async function initDB() {
     try {
         const conn = await pool.getConnection();
         await conn.query(`
-      CREATE TABLE IF NOT EXISTS images (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        title VARCHAR(255) NOT NULL,
-        category VARCHAR(255),
-        url VARCHAR(512) NOT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      CREATE TABLE IF NOT EXISTS users (
+        clerk_id VARCHAR(255) PRIMARY KEY,
+        is_allowed BOOLEAN DEFAULT TRUE,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
       )
     `);
         await conn.query(`
-      CREATE TABLE IF NOT EXISTS blacklisted_users (
-        clerk_id VARCHAR(255) PRIMARY KEY,
-        blacklisted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      CREATE TABLE IF NOT EXISTS photos (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        title VARCHAR(255) NOT NULL,
+        category VARCHAR(255),
+        image_url TEXT NOT NULL,
+        public_id VARCHAR(255) NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
         await conn.query(`
@@ -72,17 +74,17 @@ app.get('/api/users', async (req, res) => {
         if (!clerkRes.ok) throw new Error('Clerk API failed: ' + await clerkRes.text());
 
         const clerkUsers = await clerkRes.json();
-        let blacklist = [];
+        let userStats = {};
         if (pool) {
-            const [rows] = await pool.query('SELECT clerk_id FROM blacklisted_users');
-            blacklist = rows.map(r => r.clerk_id);
+            const [rows] = await pool.query('SELECT clerk_id, is_allowed FROM users');
+            rows.forEach(r => userStats[r.clerk_id] = r.is_allowed);
         }
         const users = clerkUsers.map(u => ({
             id: u.id,
             name: `${u.first_name || ''} ${u.last_name || ''}`.trim() || 'Anonymous',
             email: u.email_addresses && u.email_addresses[0] ? u.email_addresses[0].email_address : 'No Email',
             joinedAt: u.created_at,
-            isBlacklisted: blacklist.includes(u.id)
+            isAllowed: userStats[u.id] === undefined ? true : !!userStats[u.id]
         }));
         res.json(users);
     } catch (error) {
@@ -90,41 +92,67 @@ app.get('/api/users', async (req, res) => {
     }
 });
 
-app.post('/api/users/blacklist', async (req, res) => {
+app.post('/api/users/toggle', async (req, res) => {
     try {
-        const { clerkId, isBlacklisted } = req.body;
+        const { clerkId, isAllowed } = req.body;
         if (!pool) return res.status(500).json({ error: 'DB not connected' });
-        if (isBlacklisted) {
-            await pool.query('INSERT IGNORE INTO blacklisted_users (clerk_id) VALUES (?)', [clerkId]);
-        } else {
-            await pool.query('DELETE FROM blacklisted_users WHERE clerk_id = ?', [clerkId]);
-        }
+
+        await pool.query(
+            'INSERT INTO users (clerk_id, is_allowed) VALUES (?, ?) ON DUPLICATE KEY UPDATE is_allowed = ?',
+            [clerkId, isAllowed, isAllowed]
+        );
         res.json({ success: true });
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
 });
 
-app.get('/api/users/blacklist-status', async (req, res) => {
+app.get('/api/users/status', async (req, res) => {
     try {
         const { clerkId } = req.query;
-        if (!pool || !clerkId) return res.json({ isBlacklisted: false });
-        const [rows] = await pool.query('SELECT clerk_id FROM blacklisted_users WHERE clerk_id = ?', [clerkId]);
-        res.json({ isBlacklisted: rows.length > 0 });
+        if (!pool || !clerkId) return res.json({ isAllowed: true });
+        const [rows] = await pool.query('SELECT is_allowed FROM users WHERE clerk_id = ?', [clerkId]);
+        res.json({ isAllowed: rows.length > 0 ? !!rows[0].is_allowed : true });
     } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.get('/api/sign', async (req, res) => {
+    try {
+        const crypto = await import('crypto');
+        const timestamp = Math.round(new Date().getTime() / 1000);
+        const folder = 'portfolio';
+
+        // Use the correct variable name CLOUDINARY_API_SECRET
+        const secret = (process.env.CLOUDINARY_API_SECRET || "").trim();
+
+        // Sorting parameters alphabetically: folder, timestamp
+        const stringToSign = `folder=${folder}&timestamp=${timestamp}${secret}`;
+        const signature = crypto.createHash('sha1').update(stringToSign).digest('hex');
+
+        res.json({
+            timestamp,
+            signature,
+            apiKey: (process.env.CLOUDINARY_API_KEY || "").trim(),
+            cloudName: (process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME || process.env.VITE_CLOUDINARY_CLOUD_NAME || "").trim(),
+            folder
+        });
+    } catch (error) {
+        console.error('Signature Error:', error);
         res.status(500).json({ error: error.message });
     }
 });
 
 app.post('/api/images', async (req, res) => {
     try {
-        const { title, category, url } = req.body;
+        const { title, category, url, public_id } = req.body;
         if (!pool) return res.status(500).json({ error: 'Database not connected' });
         const [result] = await pool.query(
-            'INSERT INTO images (title, category, url) VALUES (?, ?, ?)',
-            [title, category || '', url]
+            'INSERT INTO photos (title, category, image_url, public_id) VALUES (?, ?, ?, ?)',
+            [title, category || '', url, public_id]
         );
-        res.json({ id: result.insertId, title, category, url });
+        res.json({ id: result.insertId, title, category, url, public_id });
     } catch (error) {
         console.error('Save Metadata Error:', error);
         res.status(500).json({ error: error.message });
@@ -134,47 +162,28 @@ app.post('/api/images', async (req, res) => {
 app.get('/api/images', async (req, res) => {
     try {
         if (!pool) return res.json([]);
-        const [rows] = await pool.query('SELECT * FROM images ORDER BY created_at DESC');
+        const [rows] = await pool.query('SELECT id, title, category, image_url as url, public_id, created_at FROM photos ORDER BY created_at DESC');
         res.json(rows);
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
 });
 
-function extractPublicId(url) {
-    try {
-        const parts = url.split('/upload/');
-        if (parts.length < 2) return null;
-        let pathStr = parts[1];
-        if (pathStr.match(/^v\d+\//)) {
-            pathStr = pathStr.replace(/^v\d+\//, '');
-        }
-        const lastDot = pathStr.lastIndexOf('.');
-        if (lastDot !== -1) {
-            pathStr = pathStr.substring(0, lastDot);
-        }
-        return pathStr;
-    } catch (e) {
-        return null;
-    }
-}
-
 app.delete('/api/images/:id', async (req, res) => {
     try {
         const { id } = req.params;
         if (!pool) return res.status(500).json({ error: 'DB not connected' });
 
-        const [rows] = await pool.query('SELECT url FROM images WHERE id = ?', [id]);
+        const [rows] = await pool.query('SELECT public_id FROM photos WHERE id = ?', [id]);
         if (rows.length === 0) return res.status(404).json({ error: 'Image not found' });
 
-        const url = rows[0].url;
-        const publicId = extractPublicId(url);
+        const publicId = rows[0].public_id;
 
         if (publicId) {
             await cloudinary.uploader.destroy(publicId);
         }
 
-        await pool.query('DELETE FROM images WHERE id = ?', [id]);
+        await pool.query('DELETE FROM photos WHERE id = ?', [id]);
         res.json({ success: true, deleted: id });
     } catch (error) {
         console.error('Delete Image Error:', error);
@@ -189,7 +198,7 @@ app.put('/api/images/:id', async (req, res) => {
         if (!pool) return res.status(500).json({ error: 'DB not connected' });
 
         await pool.query(
-            'UPDATE images SET title = ?, category = ? WHERE id = ?',
+            'UPDATE photos SET title = ?, category = ? WHERE id = ?',
             [title, category || '', id]
         );
         res.json({ success: true, updated: id });
@@ -203,6 +212,13 @@ app.post('/api/analytics/track', async (req, res) => {
     try {
         const { userId, photoId } = req.body;
         if (!pool) return res.status(500).json({ error: 'DB not connected' });
+
+        // Backend Verification: Check if user is blocked
+        const [userRows] = await pool.query('SELECT is_allowed FROM users WHERE clerk_id = ?', [userId]);
+        if (userRows.length > 0 && !userRows[0].is_allowed) {
+            return res.status(403).json({ error: 'Access Denied: User is blocked' });
+        }
+
         await pool.query('INSERT INTO downloads (user_id, photo_id) VALUES (?, ?)', [userId, photoId]);
         res.json({ success: true });
     } catch (error) {
@@ -219,9 +235,9 @@ app.get('/api/analytics', async (req, res) => {
         const totalDownloads = totalRes[0].count;
 
         const [topRes] = await pool.query(`
-            SELECT i.id, i.title, i.url, COUNT(d.id) as download_count 
+            SELECT i.id, i.title, i.image_url as url, COUNT(d.id) as download_count 
             FROM downloads d 
-            JOIN images i ON d.photo_id = i.id 
+            JOIN photos i ON d.photo_id = i.id 
             GROUP BY i.id 
             ORDER BY download_count DESC 
             LIMIT 5
@@ -240,7 +256,7 @@ app.get('/api/analytics', async (req, res) => {
         const [recentRes] = await pool.query(`
             SELECT d.user_id, i.title, d.downloaded_at 
             FROM downloads d 
-            JOIN images i ON d.photo_id = i.id 
+            JOIN photos i ON d.photo_id = i.id 
             ORDER BY d.downloaded_at DESC 
             LIMIT 10
         `);
@@ -258,7 +274,11 @@ app.get('/api/analytics', async (req, res) => {
     }
 });
 
-const PORT = 5000;
-app.listen(PORT, () => {
-    console.log(`Backend API running on http://localhost:${PORT}`);
-});
+if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
+    const PORT = 5000;
+    app.listen(PORT, () => {
+        console.log(`Backend API running on http://localhost:${PORT}`);
+    });
+}
+
+export default app;

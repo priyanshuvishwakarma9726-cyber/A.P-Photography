@@ -10,7 +10,7 @@ function Home() {
   const [selectedImage, setSelectedImage] = useState(null);
   const [images, setImages] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [isBlacklisted, setIsBlacklisted] = useState(false);
+  const [isAllowed, setIsAllowed] = useState(true);
   const navigate = useNavigate();
   const { isSignedIn, user } = useUser();
 
@@ -34,9 +34,9 @@ function Home() {
 
   useEffect(() => {
     if (isSignedIn && user?.id) {
-      fetch(`/api/users/blacklist-status?clerkId=${user.id}`)
+      fetch(`/api/users/status?clerkId=${user.id}`)
         .then(res => res.json())
-        .then(data => setIsBlacklisted(data.isBlacklisted || false))
+        .then(data => setIsAllowed(data.isAllowed === undefined ? true : !!data.isAllowed))
         .catch(console.error);
     }
   }, [isSignedIn, user]);
@@ -186,7 +186,7 @@ function Home() {
 
                 <div className="space-y-4">
                   {isSignedIn ? (
-                    isBlacklisted ? (
+                    !isAllowed ? (
                       <div className="p-4 bg-red-950/30 rounded-2xl border border-red-900/50 text-center">
                         <Lock className="w-5 h-5 mx-auto text-red-500 mb-2" />
                         <p className="text-sm text-red-400 font-medium">Access Suspended</p>
@@ -364,12 +364,12 @@ function AdminDashboard() {
     }
   };
 
-  const toggleBlacklist = async (clerkId, currentStatus) => {
+  const toggleAccess = async (clerkId, currentStatus) => {
     try {
-      const res = await fetch('/api/users/blacklist', {
+      const res = await fetch('/api/users/toggle', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ clerkId, isBlacklisted: !currentStatus })
+        body: JSON.stringify({ clerkId, isAllowed: !currentStatus })
       });
       if (res.ok) fetchUsers();
     } catch (err) {
@@ -386,23 +386,38 @@ function AdminDashboard() {
     if (!file || !title) return;
     setUploading(true);
     try {
-      const cloudName = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME || import.meta.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME || "dlq8lvl0n";
+      // 1. Ask Backend for Cloudinary secure signature
+      const signRes = await fetch('/api/sign');
+      const { timestamp, signature, apiKey, cloudName, folder } = await signRes.json();
+
+      // 2. Transmit DIRECT to Cloudinary Cloud with SIGNATURE
       const formData = new FormData();
       formData.append('file', file);
-      formData.append('upload_preset', 'portfolio_preset');
+      formData.append('folder', folder);
+      formData.append('api_key', apiKey);
+      formData.append('timestamp', timestamp);
+      formData.append('signature', signature);
 
       const cloudinaryRes = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/image/upload`, {
         method: 'POST',
         body: formData
       });
 
-      if (!cloudinaryRes.ok) throw new Error("Cloudinary Error");
+      if (!cloudinaryRes.ok) {
+        const errorText = await cloudinaryRes.text();
+        throw new Error("Cloudinary Error: " + errorText);
+      }
       const cloudData = await cloudinaryRes.json();
 
       const dbRes = await fetch('/api/images', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title, category, url: cloudData.secure_url })
+        body: JSON.stringify({
+          title,
+          category,
+          url: cloudData.secure_url,
+          public_id: cloudData.public_id
+        })
       });
 
       if (dbRes.ok) {
@@ -712,14 +727,14 @@ function AdminDashboard() {
                         <td className="px-6 py-4 text-zinc-500 hidden sm:table-cell">{new Date(u.joinedAt).toLocaleDateString()}</td>
                         <td className="px-6 py-4 text-right">
                           <button
-                            onClick={() => toggleBlacklist(u.id, u.isBlacklisted)}
-                            className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all ${u.isBlacklisted
+                            onClick={() => toggleAccess(u.id, u.isAllowed)}
+                            className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all ${!u.isAllowed
                               ? 'bg-red-500/10 text-red-500 hover:bg-red-500/20 border border-red-500/20'
                               : 'bg-green-500/10 text-green-500 hover:bg-green-500/20 border border-green-500/20'
                               }`}
                           >
-                            {u.isBlacklisted ? <UserX className="w-3.5 h-3.5" /> : <UserCheck className="w-3.5 h-3.5" />}
-                            {u.isBlacklisted ? 'Blacklisted' : 'Active Access'}
+                            {!u.isAllowed ? <UserX className="w-3.5 h-3.5" /> : <UserCheck className="w-3.5 h-3.5" />}
+                            {!u.isAllowed ? 'Blocked' : 'Allowed'}
                           </button>
                         </td>
                       </tr>
