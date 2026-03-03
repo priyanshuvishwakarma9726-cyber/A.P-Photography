@@ -230,9 +230,12 @@ function Home() {
                       <p className="text-xs text-zinc-400">
                         High-res downloads require authentication.
                       </p>
-                      <SignInButton mode="modal">
-                        <button className="mt-3 text-white text-sm font-medium hover:underline bg-white/10 px-4 py-2 rounded-lg">Sign In Now</button>
-                      </SignInButton>
+                      <button
+                        onClick={() => navigate('/sign-in')}
+                        className="mt-3 text-white text-sm font-medium hover:underline bg-white/10 px-4 py-2 rounded-lg w-full"
+                      >
+                        Sign In Now
+                      </button>
                     </div>
                   )}
                   <button
@@ -726,7 +729,7 @@ function AdminDashboard() {
     if (!file || !title) return;
     setUploading(true);
     try {
-      const cloudName = "dlq8lvl0n"; // Aapka cloud name
+      const cloudName = "dlq8lvl0n"; // Reverted to correct cloud name (letter L)
       const uploadPreset = "portfolio_preset"; // Jo aapne Step 1 mein banaya
 
       const formData = new FormData();

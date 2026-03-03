@@ -13,12 +13,20 @@ app.use(express.json());
 
 const cleanEnv = (val) => (val || "").replace(/['"]/g, "").trim();
 
+// Priority: NEXT_PUBLIC_ > VITE_ > Hardcoded correct one from Vercel dash
+const CLOUD_NAME = cleanEnv(process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME || process.env.VITE_CLOUDINARY_CLOUD_NAME || 'dlq8lvl0n');
+const API_KEY = cleanEnv(process.env.CLOUDINARY_API_KEY);
+const API_SECRET = cleanEnv(process.env.CLOUDINARY_API_SECRET);
+
 cloudinary.config({
-    cloud_name: cleanEnv(process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME || process.env.VITE_CLOUDINARY_CLOUD_NAME || 'dlq8lvl0n'),
-    api_key: cleanEnv(process.env.CLOUDINARY_API_KEY),
-    api_secret: cleanEnv(process.env.CLOUDINARY_API_SECRET),
+    cloud_name: CLOUD_NAME,
+    api_key: API_KEY,
+    api_secret: API_SECRET,
     secure: true
 });
+
+// Extra safety: Some versions of Cloudinary SDK better handle direct environment setting
+process.env.CLOUDINARY_URL = `cloudinary://${API_KEY}:${API_SECRET}@${CLOUD_NAME}`;
 
 let pool;
 try {
