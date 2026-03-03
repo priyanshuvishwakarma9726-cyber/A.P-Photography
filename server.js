@@ -124,16 +124,15 @@ app.get('/api/users/status', async (req, res) => {
 
 app.get('/api/sign', async (req, res) => {
     try {
-        const crypto = await import('crypto');
         const timestamp = Math.round(new Date().getTime() / 1000);
         const folder = 'portfolio';
 
-        // Use the correct variable name CLOUDINARY_API_SECRET
-        const secret = (process.env.CLOUDINARY_API_SECRET || "").trim();
-
-        // Sorting parameters alphabetically: folder, timestamp
-        const stringToSign = `folder=${folder}&timestamp=${timestamp}${secret}`;
-        const signature = crypto.createHash('sha1').update(stringToSign).digest('hex');
+        // Use Cloudinary SDK utility for signing to ensure correct parameter order and hashing
+        // This is much safer than manual hashing
+        const signature = cloudinary.utils.api_sign_request(
+            { timestamp, folder },
+            (process.env.CLOUDINARY_API_SECRET || "").trim()
+        );
 
         res.json({
             timestamp,
