@@ -10,7 +10,7 @@ function Home() {
   const [selectedImage, setSelectedImage] = useState(null);
   const [images, setImages] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [isAllowed, setIsAllowed] = useState(true);
+  const [isBlocked, setIsBlocked] = useState(false);
   const navigate = useNavigate();
   const { isSignedIn, user } = useUser();
 
@@ -36,7 +36,7 @@ function Home() {
     if (isSignedIn && user?.id) {
       fetch(`/api/users/status?clerkId=${user.id}`)
         .then(res => res.json())
-        .then(data => setIsAllowed(data.isAllowed === undefined ? true : !!data.isAllowed))
+        .then(data => setIsBlocked(!!data.isBlocked))
         .catch(console.error);
     }
   }, [isSignedIn, user]);
@@ -186,7 +186,7 @@ function Home() {
 
                 <div className="space-y-4">
                   {isSignedIn ? (
-                    !isAllowed ? (
+                    isBlocked ? (
                       <div className="p-4 bg-red-950/30 rounded-2xl border border-red-900/50 text-center">
                         <Lock className="w-5 h-5 mx-auto text-red-500 mb-2" />
                         <p className="text-sm text-red-400 font-medium">Access Suspended</p>
@@ -364,12 +364,12 @@ function AdminDashboard() {
     }
   };
 
-  const toggleAccess = async (clerkId, currentStatus) => {
+  const toggleAccess = async (clerkId, currentStatus, email) => {
     try {
       const res = await fetch('/api/users/toggle', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ clerkId, isAllowed: !currentStatus })
+        body: JSON.stringify({ clerkId, isBlocked: !currentStatus, email })
       });
       if (res.ok) fetchUsers();
     } catch (err) {
@@ -727,14 +727,14 @@ function AdminDashboard() {
                         <td className="px-6 py-4 text-zinc-500 hidden sm:table-cell">{new Date(u.joinedAt).toLocaleDateString()}</td>
                         <td className="px-6 py-4 text-right">
                           <button
-                            onClick={() => toggleAccess(u.id, u.isAllowed)}
-                            className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all ${!u.isAllowed
+                            onClick={() => toggleAccess(u.id, u.isBlocked, u.email)}
+                            className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all ${u.isBlocked
                               ? 'bg-red-500/10 text-red-500 hover:bg-red-500/20 border border-red-500/20'
                               : 'bg-green-500/10 text-green-500 hover:bg-green-500/20 border border-green-500/20'
                               }`}
                           >
-                            {!u.isAllowed ? <UserX className="w-3.5 h-3.5" /> : <UserCheck className="w-3.5 h-3.5" />}
-                            {!u.isAllowed ? 'Blocked' : 'Allowed'}
+                            {u.isBlocked ? <UserX className="w-3.5 h-3.5" /> : <UserCheck className="w-3.5 h-3.5" />}
+                            {u.isBlocked ? 'Blocked' : 'Allowed'}
                           </button>
                         </td>
                       </tr>

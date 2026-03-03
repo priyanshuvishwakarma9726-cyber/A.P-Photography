@@ -36,14 +36,15 @@ async function initDB() {
         await conn.query(`
       CREATE TABLE IF NOT EXISTS users (
         clerk_id VARCHAR(255) PRIMARY KEY,
-        is_allowed BOOLEAN DEFAULT TRUE,
+        email VARCHAR(255),
+        is_blocked BOOLEAN DEFAULT FALSE,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
       )
     `);
         await conn.query(`
       CREATE TABLE IF NOT EXISTS photos (
         id INT AUTO_INCREMENT PRIMARY KEY,
-        title VARCHAR(255) NOT NULL,
+        title TEXT NOT NULL,
         category VARCHAR(255),
         image_url TEXT NOT NULL,
         public_id VARCHAR(255) NOT NULL,
@@ -76,16 +77,19 @@ app.get('/api/users', async (req, res) => {
         const clerkUsers = await clerkRes.json();
         let userStats = {};
         if (pool) {
-            const [rows] = await pool.query('SELECT clerk_id, is_allowed FROM users');
-            rows.forEach(r => userStats[r.clerk_id] = r.is_allowed);
+            const [rows] = await pool.query('SELECT clerk_id, is_blocked, email FROM users');
+            rows.forEach(r => userStats[r.clerk_id] = { isBlocked: r.is_blocked, email: r.email });
         }
-        const users = clerkUsers.map(u => ({
-            id: u.id,
-            name: `${u.first_name || ''} ${u.last_name || ''}`.trim() || 'Anonymous',
-            email: u.email_addresses && u.email_addresses[0] ? u.email_addresses[0].email_address : 'No Email',
-            joinedAt: u.created_at,
-            isAllowed: userStats[u.id] === undefined ? true : !!userStats[u.id]
-        }));
+        const users = clerkUsers.map(u => {
+            const email = u.email_addresses && u.email_addresses[0] ? u.email_addresses[0].email_address : 'No Email';
+            return {
+                id: u.id,
+                name: `${u.first_name || ''} ${u.last_name || ''}`.trim() || 'Anonymous',
+                email: email,
+                joinedAt: u.created_at,
+                isBlocked: userStats[u.id] ? !!userStats[u.id].isBlocked : false
+            };
+        });
         res.json(users);
     } catch (error) {
         res.status(500).json({ error: error.message });
@@ -94,14 +98,14 @@ app.get('/api/users', async (req, res) => {
 
 app.post('/api/users/toggle', async (req, res) => {
     try {
-        const { clerkId, isAllowed } = req.body;
+        const { clerkId, isBlocked, email } = req.body;
         if (!pool) return res.status(500).json({ error: 'DB not connected' });
 
         await pool.query(
-            'INSERT INTO users (clerk_id, is_allowed) VALUES (?, ?) ON DUPLICATE KEY UPDATE is_allowed = ?',
-            [clerkId, isAllowed, isAllowed]
+            'INSERT INTO users (clerk_id, is_blocked, email) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE is_blocked = ?, email = ?',
+            [clerkId, isBlocked || false, email || '', isBlocked || false, email || '']
         );
-        res.json({ success: true });
+        res.json({ success: true, isBlocked });
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
@@ -110,9 +114,9 @@ app.post('/api/users/toggle', async (req, res) => {
 app.get('/api/users/status', async (req, res) => {
     try {
         const { clerkId } = req.query;
-        if (!pool || !clerkId) return res.json({ isAllowed: true });
-        const [rows] = await pool.query('SELECT is_allowed FROM users WHERE clerk_id = ?', [clerkId]);
-        res.json({ isAllowed: rows.length > 0 ? !!rows[0].is_allowed : true });
+        if (!pool || !clerkId) return res.json({ isBlocked: false });
+        const [rows] = await pool.query('SELECT is_blocked FROM users WHERE clerk_id = ?', [clerkId]);
+        res.json({ isBlocked: rows.length > 0 ? !!rows[0].is_blocked : false });
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
@@ -214,8 +218,8 @@ app.post('/api/analytics/track', async (req, res) => {
         if (!pool) return res.status(500).json({ error: 'DB not connected' });
 
         // Backend Verification: Check if user is blocked
-        const [userRows] = await pool.query('SELECT is_allowed FROM users WHERE clerk_id = ?', [userId]);
-        if (userRows.length > 0 && !userRows[0].is_allowed) {
+        const [userRows] = await pool.query('SELECT is_blocked FROM users WHERE clerk_id = ?', [userId]);
+        if (userRows.length > 0 && !!userRows[0].is_blocked) {
             return res.status(403).json({ error: 'Access Denied: User is blocked' });
         }
 
