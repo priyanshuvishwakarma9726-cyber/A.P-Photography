@@ -1,0 +1,264 @@
+import express from 'express';
+import cors from 'cors';
+import { v2 as cloudinary } from 'cloudinary';
+import mysql from 'mysql2/promise';
+import dotenv from 'dotenv';
+import { URL } from 'url';
+
+dotenv.config({ path: '.env.local' });
+
+const app = express();
+app.use(cors());
+app.use(express.json());
+
+cloudinary.config({
+    cloud_name: process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME || process.env.VITE_CLOUDINARY_CLOUD_NAME,
+    api_key: process.env.CLOUDINARY_API_KEY,
+    api_secret: process.env.CLOUDINARY_API_SECRET,
+    secure: true
+});
+
+let pool;
+try {
+    let dbUrl = process.env.DATABASE_URL;
+    if (dbUrl && !dbUrl.includes('ssl=')) {
+        dbUrl += (dbUrl.includes('?') ? '&' : '?') + 'ssl={"rejectUnauthorized":true}';
+    }
+    pool = mysql.createPool(dbUrl);
+} catch (err) {
+    console.error('MySQL Pool Error:', err);
+}
+
+async function initDB() {
+    if (!pool) return;
+    try {
+        const conn = await pool.getConnection();
+        await conn.query(`
+      CREATE TABLE IF NOT EXISTS images (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        title VARCHAR(255) NOT NULL,
+        category VARCHAR(255),
+        url VARCHAR(512) NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+        await conn.query(`
+      CREATE TABLE IF NOT EXISTS blacklisted_users (
+        clerk_id VARCHAR(255) PRIMARY KEY,
+        blacklisted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+        await conn.query(`
+      CREATE TABLE IF NOT EXISTS downloads (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id VARCHAR(255) NOT NULL,
+        photo_id INT NOT NULL,
+        downloaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+        conn.release();
+        console.log('TiDB Table initialized securely');
+    } catch (error) {
+        console.error('TiDB Init Error:', error.message);
+    }
+}
+initDB().catch(() => { });
+
+app.get('/api/users', async (req, res) => {
+    try {
+        const clerkRes = await fetch('https://api.clerk.com/v1/users?limit=100', {
+            headers: { 'Authorization': `Bearer ${(process.env.CLERK_SECRET_KEY || "").trim()}` }
+        });
+        if (!clerkRes.ok) throw new Error('Clerk API failed: ' + await clerkRes.text());
+
+        const clerkUsers = await clerkRes.json();
+        let blacklist = [];
+        if (pool) {
+            const [rows] = await pool.query('SELECT clerk_id FROM blacklisted_users');
+            blacklist = rows.map(r => r.clerk_id);
+        }
+        const users = clerkUsers.map(u => ({
+            id: u.id,
+            name: `${u.first_name || ''} ${u.last_name || ''}`.trim() || 'Anonymous',
+            email: u.email_addresses && u.email_addresses[0] ? u.email_addresses[0].email_address : 'No Email',
+            joinedAt: u.created_at,
+            isBlacklisted: blacklist.includes(u.id)
+        }));
+        res.json(users);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.post('/api/users/blacklist', async (req, res) => {
+    try {
+        const { clerkId, isBlacklisted } = req.body;
+        if (!pool) return res.status(500).json({ error: 'DB not connected' });
+        if (isBlacklisted) {
+            await pool.query('INSERT IGNORE INTO blacklisted_users (clerk_id) VALUES (?)', [clerkId]);
+        } else {
+            await pool.query('DELETE FROM blacklisted_users WHERE clerk_id = ?', [clerkId]);
+        }
+        res.json({ success: true });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.get('/api/users/blacklist-status', async (req, res) => {
+    try {
+        const { clerkId } = req.query;
+        if (!pool || !clerkId) return res.json({ isBlacklisted: false });
+        const [rows] = await pool.query('SELECT clerk_id FROM blacklisted_users WHERE clerk_id = ?', [clerkId]);
+        res.json({ isBlacklisted: rows.length > 0 });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.post('/api/images', async (req, res) => {
+    try {
+        const { title, category, url } = req.body;
+        if (!pool) return res.status(500).json({ error: 'Database not connected' });
+        const [result] = await pool.query(
+            'INSERT INTO images (title, category, url) VALUES (?, ?, ?)',
+            [title, category || '', url]
+        );
+        res.json({ id: result.insertId, title, category, url });
+    } catch (error) {
+        console.error('Save Metadata Error:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.get('/api/images', async (req, res) => {
+    try {
+        if (!pool) return res.json([]);
+        const [rows] = await pool.query('SELECT * FROM images ORDER BY created_at DESC');
+        res.json(rows);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+function extractPublicId(url) {
+    try {
+        const parts = url.split('/upload/');
+        if (parts.length < 2) return null;
+        let pathStr = parts[1];
+        if (pathStr.match(/^v\d+\//)) {
+            pathStr = pathStr.replace(/^v\d+\//, '');
+        }
+        const lastDot = pathStr.lastIndexOf('.');
+        if (lastDot !== -1) {
+            pathStr = pathStr.substring(0, lastDot);
+        }
+        return pathStr;
+    } catch (e) {
+        return null;
+    }
+}
+
+app.delete('/api/images/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        if (!pool) return res.status(500).json({ error: 'DB not connected' });
+
+        const [rows] = await pool.query('SELECT url FROM images WHERE id = ?', [id]);
+        if (rows.length === 0) return res.status(404).json({ error: 'Image not found' });
+
+        const url = rows[0].url;
+        const publicId = extractPublicId(url);
+
+        if (publicId) {
+            await cloudinary.uploader.destroy(publicId);
+        }
+
+        await pool.query('DELETE FROM images WHERE id = ?', [id]);
+        res.json({ success: true, deleted: id });
+    } catch (error) {
+        console.error('Delete Image Error:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.put('/api/images/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { title, category } = req.body;
+        if (!pool) return res.status(500).json({ error: 'DB not connected' });
+
+        await pool.query(
+            'UPDATE images SET title = ?, category = ? WHERE id = ?',
+            [title, category || '', id]
+        );
+        res.json({ success: true, updated: id });
+    } catch (error) {
+        console.error('Edit Image Error:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.post('/api/analytics/track', async (req, res) => {
+    try {
+        const { userId, photoId } = req.body;
+        if (!pool) return res.status(500).json({ error: 'DB not connected' });
+        await pool.query('INSERT INTO downloads (user_id, photo_id) VALUES (?, ?)', [userId, photoId]);
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Track Download Error:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.get('/api/analytics', async (req, res) => {
+    try {
+        if (!pool) return res.json({ totalDownloads: 0, topPhotos: [], recentActivity: [] });
+
+        const [totalRes] = await pool.query('SELECT COUNT(*) as count FROM downloads');
+        const totalDownloads = totalRes[0].count;
+
+        const [topRes] = await pool.query(`
+            SELECT i.id, i.title, i.url, COUNT(d.id) as download_count 
+            FROM downloads d 
+            JOIN images i ON d.photo_id = i.id 
+            GROUP BY i.id 
+            ORDER BY download_count DESC 
+            LIMIT 5
+        `);
+
+        // Fetch Clerk Users mapping
+        const clerkRes = await fetch('https://api.clerk.com/v1/users?limit=100', {
+            headers: { 'Authorization': `Bearer ${(process.env.CLERK_SECRET_KEY || "").trim()}` }
+        });
+        const clerkUsers = clerkRes.ok ? await clerkRes.json() : [];
+        const userMap = {};
+        clerkUsers.forEach(u => {
+            userMap[u.id] = `${u.first_name || ''} ${u.last_name || ''}`.trim() || 'Anonymous';
+        });
+
+        const [recentRes] = await pool.query(`
+            SELECT d.user_id, i.title, d.downloaded_at 
+            FROM downloads d 
+            JOIN images i ON d.photo_id = i.id 
+            ORDER BY d.downloaded_at DESC 
+            LIMIT 10
+        `);
+
+        const recentActivity = recentRes.map(row => ({
+            userName: userMap[row.user_id] || 'Unknown User',
+            photoTitle: row.title,
+            timestamp: row.downloaded_at
+        }));
+
+        res.json({ totalDownloads, topPhotos: topRes, recentActivity });
+    } catch (error) {
+        console.error('Analytics Fetch Error:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+const PORT = 5000;
+app.listen(PORT, () => {
+    console.log(`Backend API running on http://localhost:${PORT}`);
+});
