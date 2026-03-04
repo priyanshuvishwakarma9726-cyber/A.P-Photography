@@ -57,10 +57,19 @@ function Home() {
         <motion.div
           initial={{ opacity: 0, x: -20 }}
           animate={{ opacity: 1, x: 0 }}
-          className="flex items-center space-x-2 text-xl tracking-widest font-bold"
+          className="flex items-center space-x-2 text-xl tracking-widest font-bold group"
         >
           <Camera className="w-6 h-6" />
-          <span>A.P Photography<span className="text-zinc-500">.</span></span>
+          <div className="relative">
+            <span>A.P Photography<span className="text-zinc-500">.</span></span>
+            <button
+              onClick={handleSecretClick}
+              className="absolute -right-8 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all duration-300 focus:outline-none"
+              title="Admin"
+            >
+              <Lock className="w-3 h-3 text-zinc-800 hover:text-zinc-400 transition-colors" />
+            </button>
+          </div>
         </motion.div>
 
         <motion.div
@@ -141,16 +150,8 @@ function Home() {
         )}
       </main>
 
-      <footer className="py-8 border-t border-zinc-900 relative flex justify-center mt-12 group">
+      <footer className="py-8 border-t border-zinc-900 flex justify-center mt-12">
         <p className="text-zinc-600 text-sm">© {new Date().getFullYear()} A.P Photography. All rights reserved.</p>
-        <button
-          onClick={handleSecretClick}
-          className="absolute right-6 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-transparent hover:bg-zinc-800/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all duration-300 focus:outline-none focus:ring-1 focus:ring-zinc-700"
-          title="Secret Access"
-          aria-label="Secret Access"
-        >
-          <Lock className="w-3 h-3 text-zinc-700" />
-        </button>
       </footer>
 
       <AnimatePresence>
